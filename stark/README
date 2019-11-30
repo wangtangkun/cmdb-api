@@ -1,0 +1,270 @@
+stark组件的使用文档：
+
+1. 拷贝组件到新建项目中，注册
+        INSTALLED_APPS = [
+            ...
+            'stark.apps.StarkConfig',  # 注册形式必须是  不能使用stark
+        ]
+
+2. 配置路由  ROOT_URLCONF
+    from stark.service.stark import site
+
+    urlpatterns = [
+        ...
+        url(r'^stark/', site.urls),
+        ...
+    ]
+3. 在已注册的APP下创建stark.py
+    autodiscover_modules('stark')   —— 》 决定的名称
+
+4. 业务流程：
+
+4.1 实现简单的增删改查
+    1. 导入
+        from stark.service.stark import site, StarkConfig
+
+    2. 写配置类
+        class BusinessUnitCofig(StarkConfig):
+	        list_display = ['id', 'name']
+
+	3. 注册 model 和 配置类
+
+        site.register(models.BusinessUnit, BusinessUnitCofig)
+4.2 实现简单的增删改查  + 自定义列
+
+    class IDCCofig(StarkConfig):
+
+        def show_status(self,header,row):
+            if header:
+                return '表头'
+            return   显示的结果
+
+        # 要显示的字段
+        list_display = ['id', 'name', 'floor',show_status]
+
+    site.register(models.IDC, IDCCofig)
+
+    展示字段
+    1. 普通字段  —— 字段名
+       ```python
+       class ServerConfig(StarkConfig):
+          list_display = ['id', 'hostname','os_platform','cpu_physical_count','latest_date',]
+       ```
+    2. choice字段
+
+       1. 自定义方法
+
+          ```Python
+          # 自定义显示内容
+          def show_device_status(self,header=None,row=None):
+             if header:
+                return '状态'
+             return row.get_device_status_id_display()
+
+          list_display = [show_device_status,...]
+          ```
+       2. 组件内置的函数
+          ```
+          from stark.service.stark import get_choice_text
+          # 配置
+          list_display = [get_choice_text('device_status_id','设备状态')]
+          ```
+    3. 外键
+
+       配置中填写外键字段名
+       外键的model定义`__str__`的方法
+
+
+4.3 实现简单的增删改查  + 模糊搜索
+
+    class IDCCofig(StarkConfig):
+
+        # 要显示的字段
+        list_display = [ 'id', 'name', 'floor']
+
+        # 模糊搜索的字段名
+        search_list = ['name','外键__字段名']
+
+    site.register(models.IDC, IDCCofig)
+
+
+4.4 实现简单的增删改查  + 批量操作
+    class IDCCofig(StarkConfig):
+
+        # 要显示的字段
+        list_display = [StarkConfig.display_checkbox, 'id', 'name', 'floor']
+
+        def multi_delete(self,request):
+            # 批量操作的流程
+
+            # 没有返回值    页面就刷新
+            # 有返回值
+                HttpResponse
+                redirect
+                render
+        multi_delete.text  =  '操作的名称'
+        # 批量操作
+        action_list = [multi_delete]
+
+    site.register(models.IDC, IDCCofig)
+
+
+4.5 实现简单的增删改查  + 组合搜索
+
+    from stark.service.stark import site, StarkConfig, Option
+
+    class ServerConfig(StarkConfig):
+
+        # 组合搜索
+        list_filter = [
+            Option('business_unit', is_multi=True, condition={'id__in': [1, 3]}),
+            Option('device_status_id', is_choice=True, text_func=lambda x: x[1], value_func=lambda x: x[0], is_multi=True),
+        ]
+
+    site.register(models.ServerUnit, ServerConfig)
+
+    Option的参数：
+    ​	field   筛选的字段  —— 外键   choice
+    ​	is_multi   多选
+    ​	is_choice  是否是choice
+    ​	condition    条件  展示字段的筛选 {}
+    ​	text_func   文本显示的函数
+    ​
+
+4.6 实现简单的增删改查  + 扩展url
+
+    class ServerConfig(StarkConfig):
+
+        def show_record(self, header=None, row=None):
+            if header:
+                return '变更记录'
+            return mark_safe('<a href="/stark/repository/server/record/{}/">查看</a>'.format(row.pk))
+
+	    list_display = [, 'id', 'hostname', show_record, ]
+
+        def server_record(self, request, pk):
+            all_records = models.AssetRecord.objects.filter(server_id=pk).order_by('-create_at')
+            return render(request, 'server_record.html', {'all_records': all_records})
+
+        def extra_url(self):
+            urlpatterns = [
+                url(r'^record/(\d+)/$', self.server_record, name='server_record'),
+            ]
+
+            return urlpatterns
+
+    site.register(models.ServerUnit, ServerConfig)
+
+4.7 实现简单的增删改查  + modelform  + datepicker(日期选择)
+
+    from stark.forms.forms import StarkModelForm
+    from stark.forms.widgets import DatePickerInput
+
+    class ServerForm(StarkModelForm):
+        class Meta:
+            model = models.Server
+            fields = "__all__"
+
+            widgets = {
+                'latest_date': DatePickerInput(attrs={'class':'date-picker','autocomplete':'off'})
+            }
+
+
+    class ServerConfig(StarkConfig):
+        model_form_class = ServerForm
+
+    site.register(models.ServerUnit, ServerConfig)
+    模板中 导入相关的CSS，JS  date_picker.js 初始化  $('.date-picker')
+
+4.8 实现简单的增改查 + 无删除
+
+    class BusinessUnitConfig(StarkConfig):
+        list_display = ['id', 'name']
+
+        def get_urls(self):
+            urlpatterns = [
+                url(r'^list/$', self.wrapper(self.changelist_view), name=self.get_list_url_name),
+                url(r'^add/$', self.wrapper(self.add_view), name=self.get_add_url_name),
+                url(r'^(?P<pk>\d+)/change/', self.wrapper(self.change_view), name=self.get_change_url_name),
+                # url(r'^(?P<pk>\d+)/del/', self.wrapper(self.delete_view), name=self.get_del_url_name),
+            ]
+
+            extra = self.extra_url()
+            if extra:
+                urlpatterns.extend(extra)
+
+            return urlpatterns
+
+        def get_list_display(self):
+            val = []
+            val.extend(self.list_display)
+            val.append(StarkConfig.display_edit_del('edit'))
+            return val
+
+    site.register(models.BusinessUnit, BusinessUnitConfig)
+4.9 实现简单的增删改查 + 自定义视图函数
+
+    class BusinessUnitConfig(StarkConfig):
+        list_display = ['id', 'name']
+
+        def changelist_view(self, request, *args, **kwargs):
+            """展示页面"""
+
+        def add_view(self, request, *args, **kwargs):
+            """添加页面"""
+
+        def change_view(self, request, pk, *args, **kwargs):
+            """编辑页面"""
+
+        def delete_view(self, request, pk, *args, **kwargs):
+            """删除页面"""
+    site.register(models.BusinessUnit, BusinessUnitConfig)
+
+4.10 实现简单的增删改查 + 定义modelform + 校验规则
+
+    class ServerForm(StarkModelForm):
+        class Meta:
+            model = models.Server
+            fields = "__all__"
+
+            widgets = {
+                'latest_date': DatePickerInput(attrs={'class':'date-picker','autocomplete':'off'})
+            }
+
+        def clean_字段名(self):
+            self.cleaned_data[name]
+            通过校验  返回 当前字段的值
+            不通过校验 抛出异常ValidationError
+
+        def clean(self):
+            通过校验  返回 所有的值
+            不通过校验
+                self.add_error(field_name,'错误提示')
+                抛出异常ValidationError
+
+
+
+    class ServerConfig(StarkConfig):
+
+        model_form_class = ServerForm
+
+    site.register(models.Server, ServerConfig)
+
+4.11 实现简单的增删改查 + prev  对一个model做两个增删改查
+
+    class BusinessUnitConfig(StarkConfig):
+        list_display = ['id', 'name']
+
+
+    site.register(models.BusinessUnit, BusinessUnitConfig)
+
+
+    class BusinessUnitConfig1(StarkConfig):
+        list_display = ['id', 'name']
+
+        def get_queryset(self, request, *args, **kwargs):
+            return self.model_class.objects.filter()
+
+    site.register(models.BusinessUnit, BusinessUnitConfig1, 'v1')
+
+
